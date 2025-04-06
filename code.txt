@@ -1,0 +1,89 @@
+// بارگذاری داده‌ها از فایل‌های 2021 و 2022
+use "C:\Users\Reza\Downloads\Telegram Desktop\data_2021.dta", clear
+append using "C:\Users\Reza\Downloads\Telegram Desktop\data_2022.dta"
+
+// اعمال محدودیت سن (افراد بین 24 تا 65 سال)
+keep if yas >= 24 & yas <= 65
+
+// تعریف متغیر سال‌های تحصیل
+gen years_of_schooling = .
+replace years_of_schooling = 0 if okur_yazar == 2
+replace years_of_schooling = 2 if okur_yazar == 1 & okul_biten_k == 1
+replace years_of_schooling = 5 if okul_biten_k == 2
+replace years_of_schooling = 8 if okul_biten_k == 3
+replace years_of_schooling = 11 if okul_biten_k == 41 | okul_biten_k == 42
+replace years_of_schooling = 15 if okul_biten_k == 511 | okul_biten_k == 512
+replace years_of_schooling = 17 if okul_biten_k == 52
+
+// تعریف متغیرهای درمان
+gen treatment1 = (years_of_schooling >= 8)
+gen treatment2 = (years_of_schooling >= 11)
+gen treatment3 = (years_of_schooling >= 15)
+
+// تبدیل درآمد ماهانه به درآمد ساعتی
+gen hourly_wage = gelir_gecenay_k / (esas_hafsaat_genel * 4) if !missing(gelir_gecenay_k, esas_hafsaat_genel)
+
+// تعریف نرخ تورم به صورت دستی (فرضی)
+gen enflasyon_orani = 1.2 if referans_yil == 2022 // به عنوان مثال، نرخ تورم 20 درصد برای سال 2022
+
+// تعریف متغیر درآمد واقعی ساعتی
+gen real_hourly_wage = hourly_wage / enflasyon_orani if !missing(hourly_wage, enflasyon_orani)
+
+// به‌روزرسانی دستمزد ساعتی لگاریتمی برای سال 2022 با استفاده از میزان تورم
+gen ln_real_hourly_wage = ln(real_hourly_wage) if !missing(real_hourly_wage)
+replace ln_real_hourly_wage = ln(real_hourly_wage / enflasyon_orani) if referans_yil == 2022 & !missing(real_hourly_wage, enflasyon_orani)
+
+// تعریف متغیرهای نتیجه
+gen lfp = (calisma == 1 | calisma_sahip_is == 1) if !missing(calisma, calisma_sahip_is)
+gen wage_employee = (calisma_sahip_is == 1) if !missing(calisma_sahip_is)
+
+// تعریف متغیر دامی برای تولد بعد از سپتامبر 1986
+gen after_sept_1986 = (dogum_yil > 1986) | (dogum_yil == 1986 & dogum_ay > 9)
+
+// آمار توصیفی برای متغیرهای مورد نظر
+foreach var in years_of_schooling hourly_wage real_hourly_wage ln_real_hourly_wage lfp wage_employee {
+    display "Descriptive statistics for `var' (Overall):"
+    summarize `var'
+    display "------------------------------------"
+    
+    display "Descriptive statistics for `var' (Men):"
+    summarize `var' if cinsiyet == 1
+    display "------------------------------------"
+    
+    display "Descriptive statistics for `var' (Women):"
+    summarize `var' if cinsiyet == 2
+    display "------------------------------------"
+}
+
+// بررسی collinearity
+corr years_of_schooling dogum_yil
+
+// برآوردهای OLS برای مردان
+foreach outcome in lfp wage_employee ln_real_hourly_wage {
+    regress `outcome' years_of_schooling if cinsiyet == 1
+    display "Results for `outcome' (Men) - OLS:"
+    display "------------------------------------"
+}
+
+// برآوردهای OLS برای زنان
+foreach outcome in lfp wage_employee ln_real_hourly_wage {
+    regress `outcome' years_of_schooling if cinsiyet == 2
+    display "Results for `outcome' (Women) - OLS:"
+    display "------------------------------------"
+}
+
+// برآوردها برای مردان با استفاده از IV
+foreach outcome in lfp wage_employee ln_real_hourly_wage {
+    ivregress 2sls `outcome' (years_of_schooling = dogum_yil) if cinsiyet == 1
+    display "Results for `outcome' (Men) - IV:"
+    estat firststage
+    display "------------------------------------"
+}
+
+// برآوردها برای زنان با استفاده از IV
+foreach outcome in lfp wage_employee ln_real_hourly_wage {
+    ivregress 2sls `outcome' (years_of_schooling = dogum_yil) if cinsiyet == 2
+    display "Results for `outcome' (Women) - IV:"
+    estat firststage
+    display "------------------------------------"
+}
